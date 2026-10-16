@@ -4,12 +4,15 @@ The group addressing and matrix action are adapted from FlagQuantum's
 flagquantum/kernels/triton/statevector_gates.py (Apache-2.0).
 """
 
+import torch
 import triton
 import triton.language as tl
 
+from .utils import validate_matrix_inputs
+
 
 @triton.jit
-def apply_matrix_2q(
+def apply_matrix_2q_kernel(
     state,
     matrix,
     output,
@@ -19,14 +22,6 @@ def apply_matrix_2q(
     MATRIX_BATCHED: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
-    tl.static_assert(SIZE >= 4 and (SIZE & (SIZE - 1)) == 0, "SIZE must be a power of two >= 4")
-    tl.static_assert(FIRST_TARGET_BIT >= 0 and (1 << FIRST_TARGET_BIT) < SIZE, "Invalid first target bit")
-    tl.static_assert(SECOND_TARGET_BIT >= 0 and (1 << SECOND_TARGET_BIT) < SIZE, "Invalid second target bit")
-    tl.static_assert(FIRST_TARGET_BIT != SECOND_TARGET_BIT, "Target bits must be distinct")
-    tl.static_assert(state.dtype.element_ty == tl.float32, "state must point to float32 components")
-    tl.static_assert(matrix.dtype.element_ty == tl.float32, "matrix must point to float32 components")
-    tl.static_assert(output.dtype.element_ty == tl.float32, "output must point to float32 components")
-
     group = tl.program_id(0).to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
     batch = tl.program_id(1).to(tl.int64)
     valid = group < SIZE // 4
@@ -69,3 +64,38 @@ def apply_matrix_2q(
             result_imag += coefficient_real * values_imag[column] + coefficient_imag * values_real[column]
         tl.store(output + 2 * indices[row], result_real, valid)
         tl.store(output + 2 * indices[row] + 1, result_imag, valid)
+
+
+def apply_matrix_2q(state, matrix, first_target_bit, second_target_bit, out=None):
+    """Apply a 4x4 matrix to a contiguous complex64 state on an accelerator.
+
+    ``state`` has shape (N,) or (B, N), with N a power of two. ``matrix``
+    has shape (4, 4) for a shared matrix or (B, 4, 4) for per-sample matrices
+    (B=1 for an unbatched state). Bit 0 is the least significant index bit.
+    The matrix basis is |first, second> in 00, 01, 10, 11 order, even when
+    first_target_bit > second_target_bit. ``out`` must match state; pass
+    ``out=state`` for an in-place update. Autograd is not supported.
+    """
+    size, batch = validate_matrix_inputs(
+        state, matrix, (first_target_bit, second_target_bit), out
+    )
+    if out is None:
+        out = torch.empty_like(state)
+    if batch == 0:
+        return out
+
+    block = 256
+    grid = (triton.cdiv(size // 4, block), batch)
+    with torch.get_device_module(state.device).device(state.device):
+        apply_matrix_2q_kernel[grid](
+            torch.view_as_real(state),
+            torch.view_as_real(matrix),
+            torch.view_as_real(out),
+            SIZE=size,
+            FIRST_TARGET_BIT=first_target_bit,
+            SECOND_TARGET_BIT=second_target_bit,
+            MATRIX_BATCHED=matrix.ndim == 3,
+            BLOCK=block,
+            num_warps=4,
+        )
+    return out

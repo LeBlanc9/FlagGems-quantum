@@ -1,11 +1,14 @@
 """Apply a row-major 2x2 matrix to pairs of complex64 amplitudes."""
 
+import torch
 import triton
 import triton.language as tl
 
+from .utils import validate_matrix_inputs
+
 
 @triton.jit
-def apply_matrix_1q(
+def apply_matrix_1q_kernel(
     state,
     matrix,
     output,
@@ -14,12 +17,6 @@ def apply_matrix_1q(
     MATRIX_BATCHED: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
-    tl.static_assert(SIZE >= 2 and (SIZE & (SIZE - 1)) == 0, "SIZE must be a power of two >= 2")
-    tl.static_assert(TARGET_BIT >= 0 and (1 << TARGET_BIT) < SIZE, "Invalid target bit")
-    tl.static_assert(state.dtype.element_ty == tl.float32, "state must point to float32 components")
-    tl.static_assert(matrix.dtype.element_ty == tl.float32, "matrix must point to float32 components")
-    tl.static_assert(output.dtype.element_ty == tl.float32, "output must point to float32 components")
-
     pair = tl.program_id(0).to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
     batch = tl.program_id(1).to(tl.int64)
     valid = pair < SIZE // 2
@@ -55,3 +52,34 @@ def apply_matrix_1q(
     tl.store(output + 2 * index0 + 1, y0_imag, valid)
     tl.store(output + 2 * index1, y1_real, valid)
     tl.store(output + 2 * index1 + 1, y1_imag, valid)
+
+
+def apply_matrix_1q(state, matrix, target_bit, out=None):
+    """Apply a 2x2 matrix to a contiguous complex64 state on an accelerator.
+
+    ``state`` has shape (N,) or (B, N), with N a power of two. ``matrix``
+    has shape (2, 2) for a shared matrix or (B, 2, 2) for per-sample matrices
+    (B=1 for an unbatched state). Bit 0 is the least significant index bit.
+    ``out`` must match state; pass ``out=state`` for an in-place update.
+    Autograd is not supported.
+    """
+    size, batch = validate_matrix_inputs(state, matrix, (target_bit,), out)
+    if out is None:
+        out = torch.empty_like(state)
+    if batch == 0:
+        return out
+
+    block = 256
+    grid = (triton.cdiv(size // 2, block), batch)
+    with torch.get_device_module(state.device).device(state.device):
+        apply_matrix_1q_kernel[grid](
+            torch.view_as_real(state),
+            torch.view_as_real(matrix),
+            torch.view_as_real(out),
+            SIZE=size,
+            TARGET_BIT=target_bit,
+            MATRIX_BATCHED=matrix.ndim == 3,
+            BLOCK=block,
+            num_warps=4,
+        )
+    return out
