@@ -8,6 +8,7 @@ import torch
 import triton
 import triton.language as tl
 
+from .indexing import _insert_zero_bit
 from .utils import validate_matrix_inputs
 
 
@@ -29,10 +30,8 @@ def apply_matrix_2q_kernel(
     # Insert zero bits from low to high to enumerate each disjoint group once.
     low_bit = min(FIRST_TARGET_BIT, SECOND_TARGET_BIT)
     high_bit = max(FIRST_TARGET_BIT, SECOND_TARGET_BIT)
-    lower = group & ((1 << low_bit) - 1)
-    with_low_zero = ((group - lower) << 1) + lower
-    lower = with_low_zero & ((1 << high_bit) - 1)
-    index00 = batch * SIZE + ((with_low_zero - lower) << 1) + lower
+    with_low_zero = _insert_zero_bit(group, low_bit)
+    index00 = batch * SIZE + _insert_zero_bit(with_low_zero, high_bit)
 
     # Matrix basis order is |first, second>: 00, 01, 10, 11.
     index01 = index00 + (1 << SECOND_TARGET_BIT)

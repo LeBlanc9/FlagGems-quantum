@@ -1,6 +1,42 @@
 """Triton kernels for quantum simulation."""
 
-from .statevector import apply_matrix_1q, apply_matrix_2q
+from .statevector import (
+    apply_ccx_inplace,
+    apply_cphase_inplace,
+    apply_crx_inplace,
+    apply_cry_inplace,
+    apply_crz_inplace,
+    apply_cswap_inplace,
+    apply_cx_inplace,
+    apply_cy_inplace,
+    apply_cz_inplace,
+    apply_diagonal_inplace,
+    apply_h_inplace,
+    apply_i_inplace,
+    apply_matrix_1q,
+    apply_matrix_2q,
+    apply_phase_inplace,
+    apply_rx_inplace,
+    apply_rxx_inplace,
+    apply_ry_inplace,
+    apply_ryy_inplace,
+    apply_rz_inplace,
+    apply_rzz_inplace,
+    apply_s_inplace,
+    apply_sdg_inplace,
+    apply_swap_inplace,
+    apply_sx_inplace,
+    apply_sxdg_inplace,
+    apply_t_inplace,
+    apply_tdg_inplace,
+    apply_u1_inplace,
+    apply_u2_inplace,
+    apply_u3_inplace,
+    apply_x_inplace,
+    apply_y_inplace,
+    apply_z_inplace,
+    initialize_basis_state,
+)
+from .statevector import __all__ as __all__
 
-__all__ = ["apply_matrix_1q", "apply_matrix_2q"]
 __version__ = "0.1.0.dev0"

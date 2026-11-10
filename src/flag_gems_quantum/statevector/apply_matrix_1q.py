@@ -4,6 +4,7 @@ import torch
 import triton
 import triton.language as tl
 
+from .indexing import _insert_zero_bit
 from .utils import validate_matrix_inputs
 
 
@@ -23,8 +24,7 @@ def apply_matrix_1q_kernel(
 
     # Insert a zero at the target bit; flipping it selects the paired amplitude.
     target_mask = 1 << TARGET_BIT
-    lower = pair & (target_mask - 1)
-    index0 = batch * SIZE + ((pair - lower) << 1) + lower
+    index0 = batch * SIZE + _insert_zero_bit(pair, TARGET_BIT)
     index1 = index0 + target_mask
 
     x0_real = tl.load(state + 2 * index0, valid, 0.0)
